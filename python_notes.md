@@ -900,3 +900,274 @@ def parse_token(token: str) -> Union[str, float]:
 
 ## Generic collections
 
+```py
+def tokenize(text: str) -> list[str]:
+    return text.upper().split()
+```
+
+Las colecciones que pueden anotarse de esta forma son:
+
+- list
+- collections.deque
+- set
+- frozenset
+- Iterator[str]
+- abc.Sequence
+- abc.MutableSequence 
+- abc.Container
+- abc.Set
+- abc.MutableSet
+- abc.Collection
+
+## tuplas
+
+Las tuplas se anotan como sigue:
+
+```py
+def geohash(lat_lon: tuple[float, float]) -> str:  
+    return gh.encode(*lat_lon, PRECISION)
+```
+
+Otro ejemplo:
+
+```py
+from collections.abc import Sequence
+
+def columnize(sequence: Sequence[str], num_columns: int = 0) -> list[tuple[str, ...]]:
+    if num_columns == 0:
+        num_columns = round(len(sequence) ** .5)
+        num_rows, reminder = divmod(len(sequence), num_columns)
+    num_rows += bool(reminder)
+    return [tuple(sequence[i::num_rows]) for i in range(num_rows)]
+```
+
+## Generic mappings
+
+Podemos anotar un diccionario como `MappingType[KeyType, ValueType]` o como `dict[str, set[str]]`.
+
+## Abstract Base Classes (abc)
+
+Si declaramos lo siguiente:
+
+```py
+from collections.abc import Mapping
+
+def name2hex(name: str, color_map: Mapping[str, int]) -> str:
+```
+
+Al usar `abc.Mapping` podemos pasar una instancia de `dict`, `defaultdict`, `ChainMap`, una hija de `UserDict`. Si usaramos:
+
+```py
+def name2hex(name: str, color_map: dict[str, int]) -> str:
+```
+
+La definición es mucho más restrictiva, el argumento tiene que ser si o si un `dict`.
+
+## Generics
+
+Podemos definir un genéric usando `TypeVar`:
+```py
+from collections.abc import Sequence
+from random import shuffle
+from typing import TypeVar
+
+T = TypeVar('T')
+
+def sample(population: Sequence[T], size: int) -> list[T]:
+    if size < 1:
+        raise ValueError('size must be >= 1')
+    result = list(population)
+    shuffle(result)
+    return result[:size]
+```
+
+Podemos ser más especificos al definir el genérico:
+
+```py
+from collections.abc import Iterable
+from decimal import Decimal
+from fractions import Fraction
+from typing import TypeVar
+
+NumberT = TypeVar('NumberT', float, Decimal, Fraction)
+
+def mode(data: Iterable[NumberT]) -> NumberT:
+```
+
+aquí hemos dicho que el genérico tiene que ser un `float`, `Decimal` o `Fraction`. Podemos tambien hacer que el generic sea una subclase:
+
+```py
+from collections import Counter
+from collections.abc import Iterable, Hashable
+from typing import TypeVar
+
+HashableT = TypeVar('HashableT', bound=Hashable)
+
+def mode(data: Iterable[HashableT]) -> HashableT:
+    pairs = Counter(data).most_common(1)
+    if len(pairs) == 0:
+        raise ValueError('no mode for empty data')
+    return pairs[0][0]
+```
+
+estamos diciendo que el genérico tiene que ser una subclase de `Hashable`.
+
+## Callable
+
+Indicamos la lista de argumentos y el tipo que devuelbe la función:
+
+```py
+def repl(input_fn: Callable[[Any], str] = input) -> None:
+```
+
+# Decorators
+
+Los decorators se cargan al importar el modulo en el que estan definidos:
+
+```py
+registry = []  
+
+def register(func):  
+    print(f'running register({func})')  
+    registry.append(func)  
+    return func  
+
+a=0
+
+@register
+def f1(v1):
+    global a
+    a=v1
+    print('running f1()')
+
+@register
+def f2():
+    global a
+    a+=1
+    print('running f2()')
+
+def f3(a):  
+    global a
+    print(a)
+    print('running f3()')
+
+def main():  
+    print('running main()')
+    print('registry ->', registry)
+    f1()
+    f2()
+    f3()
+
+if __name__ == '__main__':
+    main()  
+```
+
+Podemos usar dos keywords para especificar el scope:
+- global. Indicamos que la variable que usaremos tiene scope global
+- nolocal. Indicamos que la variable que usaremos no esta definida de forma local. Será una variable definida en la closure
+
+## functools.wraps
+
+Con `functools.wraps` hacemos que nuestro wrapper _"respete"_ el `__doc__` y `__name__` de la función original:
+
+```py
+import time
+import functools
+
+
+def clock(func):
+    @functools.wraps(func)
+    def clocked(*args, **kwargs):
+        t0 = time.perf_counter()
+        result = func(*args, **kwargs)
+        elapsed = time.perf_counter() - t0
+        name = func.__name__
+        arg_lst = [repr(arg) for arg in args]
+        arg_lst.extend(f'{k}={v!r}' for k, v in kwargs.items())
+        arg_str = ', '.join(arg_lst)
+        print(f'[{elapsed:0.8f}s] {name}({arg_str}) -> {result!r}')
+        return result
+    return clocked
+```
+
+## Cache
+
+```py
+import functools
+
+from clockdeco import clock
+
+
+@functools.cache  
+@clock  
+def fibonacci(n):
+    if n < 2:
+        return n
+    return fibonacci(n - 2) + fibonacci(n - 1)
+
+@lru_cache(maxsize=2**20, typed=True)
+def fibonacci2(n):
+    if n < 2:
+        return n
+    return fibonacci2(n - 2) + fibonacci2(n - 1)
+
+if __name__ == '__main__':
+    print(fibonacci(6))
+```
+
+## Parametrized Decorator
+
+Podemos definir parametros en el decorador:
+
+```py
+import time
+
+DEFAULT_FMT = '[{elapsed:0.8f}s] {name}({args}) -> {result}'
+
+def clock(fmt=DEFAULT_FMT):  
+    def decorate(func):      
+        def clocked(*_args): 
+            t0 = time.perf_counter()
+            _result = func(*_args)  
+            elapsed = time.perf_counter() - t0
+            name = func.__name__
+            args = ', '.join(repr(arg) for arg in _args)  
+            result = repr(_result)  
+            print(fmt.format(**locals()))  
+            return _result  
+        return clocked  
+    return decorate  
+
+if __name__ == '__main__':
+    @clock('{name}: {elapsed}s') 
+    def snooze(seconds):
+        time.sleep(seconds)
+
+    for i in range(3):
+        snooze(.123)
+```
+
+Una forma más elegante de conseguir este mismo efecto es a través de una clase que recoja en su constructos los parámetros:
+
+```py
+import time
+
+DEFAULT_FMT = '[{elapsed:0.8f}s] {name}({args}) -> {result}'
+
+class clock:  
+
+    def __init__(self, fmt=DEFAULT_FMT):  
+        self.fmt = fmt
+    
+    def __call__(self, func):  
+        def clocked(*_args):
+            t0 = time.perf_counter()
+            _result = func(*_args)  
+            elapsed = time.perf_counter() - t0
+            name = func.__name__
+            args = ', '.join(repr(arg) for arg in _args)
+            result = repr(_result)
+            print(self.fmt.format(**locals()))
+            return _result
+        return clocked
+```
