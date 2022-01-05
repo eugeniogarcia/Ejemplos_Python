@@ -1,10 +1,3 @@
-
-Three very important specializations of Collection are:
-
-- Sequence, formalizing the interface of built-ins like list and str;
-- Mapping, implemented by dict, collections.defaultdict, etc.;
-- Set: the interface of the set and frozenset built-in types.
-
 # Varios
 
 ## Comprehension
