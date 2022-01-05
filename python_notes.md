@@ -1,6 +1,20 @@
+- [Comprenhension](#comprenhension)
+- [Generadores](#gen)
+- [Colas](#colas)
+- [Pattern Matching](#patron)
+- [Copia de objetos. Shallow y Deep Copy](#copia)
+- [Métodos especiales](#esp)
+- [Diccionarios](#dicc)
+- [Sets](#set)
+- [Crear clases](#clases)
+- [Programacion funcional](#func)
+- [Tipificación de objetos](#hint)
+- [Decoradores](#dec)
+- [Caso práctico de Modelado de Objetos](#modelado)
+
 # Varios
 
-## Comprehension
+## <a name="comprenhension">Comprehension</a>
 
 Son equivalentes:
 
@@ -16,7 +30,7 @@ Producto cartesiano:
 tshirts = [(color, size) for color in colors for size in sizes]
 ```
 
-## Generator
+## <a name="gen">Generator</a>
 
 ```py
 tshirts = (color for color in colors)
@@ -24,7 +38,7 @@ tshirts = (color for color in colors)
 tuple(ord(symbol) for symbol in symbols)
 ```
 
-## Colas
+## <a name="colas">Colas</a>
 
 ```py
 from collections import deque
@@ -89,7 +103,7 @@ from collections import asyncio
 
 Provides Queue, LifoQueue, PriorityQueue, and JoinableQueue with APIs inspired by the classes in the queue and multiprocessing modules, but adapted for managing tasks in asynchronous programming
 
-## Pattern Matching
+## <a name="patron">Pattern Matching</a>
 
 ```py
 def get_creators(record: dict) -> list:
@@ -106,7 +120,7 @@ def get_creators(record: dict) -> list:
             raise ValueError(f'Invalid record: {record!r}')
 ```
 
-## Copy
+## <a name="copia">Copy</a>
 
 Cuando igualamos una variable a otra, lo que estamos haciendo es establecer creando una referencia a la misma posición de memoria.
 
@@ -229,7 +243,7 @@ id(bus1.passengers), id(bus2.passengers), id(bus3.passengers)
 
 Los argumentos se pasan a las funciones siempre por referencia. Esto significa que cuando los argumentos se refieran a tipos mutables, una modificación del argumento será _visible_ fuera del método.
 
-# Special methods
+# <a name="esp">Special methods</a>
 
 The `__builtins__.__dict__` stores all built-in types, objects, and functions.
 
@@ -283,15 +297,17 @@ Podemos hacer usar `bingo` como si se tratara de una función:
 bingo()
 ```
 
-# Diccionario
+# <a name="dicc">Diccionario</a>
+
+Métodos que hacen de un diccionario un diccionario:
 
 ```py
-d.__contains__(k)
+d.__contains__(k). Implementa `in`
 d.__delitem__(k)
-d.__getitem__(k)
-d.__iter__()
+d.__getitem__(k). Implementa `[x]`
+d.__iter__().
 d.__len__()
-d.__missing__(k)
+d.__missing__(k). Este método es llamado cuando hacemos un `[x]` y el índice no existe
 d.__reversed__()
 d.__setitem__(k, v)
 ```
@@ -351,19 +367,31 @@ ct.most_common(3)
 [('a', 10), ('z', 3), ('b', 2)]
 ```
 
-# Set y frozenset
+# <a name="set">Set y frozenset</a>
+
+Podemos crear un set a partir de una lista:
 
 ```py
->>> l = ['spam', 'spam', 'eggs', 'spam', 'bacon', 'eggs']
->>> set(l)
-{'eggs', 'spam', 'bacon'}
->>> list(set(l))
-['eggs', 'spam', 'bacon']
+l = ['spam', 'spam', 'eggs', 'spam', 'bacon', 'eggs']
 
+set(l)
+{'eggs', 'spam', 'bacon'}
+```
+
+Podemos crear una lista a partir de un set:
+
+```py
+list(set(l))
+['eggs', 'spam', 'bacon']
+```
+
+El set nos permite hacer operaciones de conjuntos. Por ejemplo, aquí hacemos la intersección de dos conjuntos:
+
+```py
 found = len(set(needles) & set(haystack))
 ```
 
-Otras operaciones:
+Otras operaciones disponibles:
 
 |operador|magic|descripcion|
 |----|----|----|
@@ -410,7 +438,13 @@ d1.keys() | s
 {'a', 'c', 'b', 'd', 'i', 'e'}
 ```
 
-# Implementar Clases
+# <a name="clases">Implementar Clases</a>
+
+Tenemos dos técnicas con las que podemos crear clases que incorporen los _ingredientes típicos_ de un objeto, como `__repr__` y `__eq__`:
+
+- namedtuple
+- typed namedtuple. Similar al anterior, pero tipitficando los mienbros de la clase
+- dataclass
 
 ## namedtuples
 
@@ -431,6 +465,8 @@ Coordinate(lat=55.756, lon=37.617)
 moscow == Coordinate(lat=55.756, lon=37.617)  
 True
 ```
+
+Naturalmente tambien podemos crear una subclase de `namedtuple` y así incluir otros métodos custom.
 
 ## typed namedtuples
 
@@ -619,7 +655,7 @@ Coordinate._field_defaults
 {'reference': 'WGS84'}
 ```
  
-# Functional programming
+# <a name="func">Functional programming</a>
 
 Una función que acepta como argumento una función y/o devuelve una función. _Reduce_ toma una función y retorna un valor:
 
@@ -763,7 +799,7 @@ list(map(triple, range(1, 10)))
 [3, 6, 9, 12, 15, 18, 21, 24, 27]
 ```
 
-# Hints
+# <a name="hint">Hints</a>
 
 ## mypy
 
@@ -1013,7 +1049,7 @@ Indicamos la lista de argumentos y el tipo que devuelbe la función:
 def repl(input_fn: Callable[[Any], str] = input) -> None:
 ```
 
-# Decorators
+# <a name="dec">Decorators</a>
 
 Los decorators se cargan al importar el modulo en el que estan definidos:
 
@@ -1164,3 +1200,5 @@ class clock:
             return _result
         return clocked
 ```
+
+# <a name="modelado">Modelado de Objetos</a>
