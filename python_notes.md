@@ -11,6 +11,8 @@
 - [Tipificación de objetos](#hint)
 - [Decoradores](#dec)
 - [Caso práctico de Modelado de Objetos](#modelado)
+- [Clases Abstractas](#ABC)
+- [Protocolos](#protocol)
 
 # Varios
 
@@ -1202,3 +1204,401 @@ class clock:
 ```
 
 # <a name="modelado">Modelado de Objetos</a>
+
+## Implementation of the Order class with pluggable discount strategies
+
+Declaramos las clases base como subclases de `NamedTuple`. Esto nos permite definir algún método dentro de la clase:
+
+```py
+from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from decimal import Decimal
+from typing import NamedTuple, Optional
+
+
+class Customer(NamedTuple):
+    name: str
+    fidelity: int
+
+class LineItem(NamedTuple):
+    product: str
+    quantity: int
+    price: Decimal
+    
+    def total(self) -> Decimal:
+        return self.price * self.quantity
+```
+
+El pedido esta formado por una lista de `LineItem`. Lo tipificamos como __`Sequence`__ para poder definir cart como __strings, lists, tuples, byte sequences, byte arrays, o range objects__. También fijemonos en `__repr__`, como retornamos una _f-string_:
+
+```py
+class Order(NamedTuple):  # the Context
+    customer: Customer
+    cart: Sequence[LineItem]
+    promotion: Optional['Promotion'] = None
+
+    def total(self) -> Decimal:
+        totals = (item.total() for item in self.cart)
+        return sum(totals, start=Decimal(0))
+
+    def due(self) -> Decimal:
+        if self.promotion is None:
+            discount = Decimal(0)
+        else:
+            discount = self.promotion.discount(self)
+        return self.total() - discount
+
+    def __repr__(self):
+        return f'<Order total: {self.total():.2f} due: {self.due():.2f}>'
+```
+
+en este patrón de diseño damos pie a que se usen diferentes tipos de promociones definiendo un tipo abstracto, `Promotion`. Este tipo abstracto tiene un método llamado `discount` que toma por argumento una `Order` - `self.promotion.discount(self)`. Podemos verlo también en la definición:
+
+```py
+class Promotion(ABC):  # the Strategy: an abstract base class
+    @abstractmethod
+    def discount(self, order: Order) -> Decimal:
+        """Return discount as a positive dollar amount"""
+```
+
+podemos definir diferentes tipos de promociones como subclases de `Promotion`:
+
+```py
+class FidelityPromo(Promotion):  # first Concrete Strategy
+    """5% discount for customers with 1000 or more fidelity points"""
+
+    def discount(self, order: Order) -> Decimal:
+        rate = Decimal('0.05')
+        if order.customer.fidelity >= 1000:
+            return order.total() * rate
+        return Decimal(0)
+```
+
+otra más:
+
+```py
+class BulkItemPromo(Promotion):  # second Concrete Strategy
+    """10% discount for each LineItem with 20 or more units"""
+
+    def discount(self, order: Order) -> Decimal:
+        discount = Decimal(0)
+        for item in order.cart:
+            if item.quantity >= 20:
+                discount += item.total() * Decimal('0.1')
+        return discount
+```
+
+y otra:
+
+```py
+class LargeOrderPromo(Promotion):  # third Concrete Strategy
+    """7% discount for orders with 10 or more distinct items"""
+
+    def discount(self, order: Order) -> Decimal:
+        distinct_items = {item.product for item in order.cart}
+        if len(distinct_items) >= 10:
+            return order.total() * Decimal('0.07')
+        return Decimal(0)
+```
+
+Por ejemplo, si tenemos estos clientes y este carrito:
+
+```ps
+joe = Customer('John Doe', 0)  
+ann = Customer('Ann Smith', 1100)
+cart = (LineItem('banana', 4, Decimal('.5')),  
+    LineItem('apple', 10, Decimal('1.5')),
+    LineItem('watermelon', 5, Decimal(5)))
+```
+
+Podemos ahora crear diferentes pedidos:
+
+```ps
+Order(joe, cart, FidelityPromo())  
+<Order total: 42.00 due: 42.00>
+
+Order(ann, cart, FidelityPromo())  
+<Order total: 42.00 due: 39.90>
+
+banana_cart = (LineItem('banana', 30, Decimal('.5')),  
+                LineItem('apple', 10, Decimal('1.5')))
+
+Order(joe, banana_cart, BulkItemPromo())  
+<Order total: 30.00 due: 28.50>
+
+long_cart = tuple(LineItem(str(sku), 1, Decimal(1)) 
+                  for sku in range(10))
+
+Order(joe, long_cart, LargeOrderPromo())  
+<Order total: 10.00 due: 9.30>
+
+Order(joe, cart, LargeOrderPromo())
+<Order total: 42.00 due: 42.00>
+```
+
+## Function-Oriented Strategy
+
+```py
+@dataclass(frozen=True)
+class Order:  # the Context
+    customer: Customer
+    cart: Sequence[LineItem]
+    promotion: Optional[Callable[['Order'], Decimal]] = None  
+
+    def total(self) -> Decimal:
+        totals = (item.total() for item in self.cart)
+        return sum(totals, start=Decimal(0))
+
+    def due(self) -> Decimal:
+        if self.promotion is None:
+            discount = Decimal(0)
+        else:
+            discount = self.promotion(self)  
+        return self.total() - discount
+
+    def __repr__(self):
+        return f'<Order total: {self.total():.2f} due: {self.due():.2f}>'
+```
+
+y definimos ahora las funciones:
+
+```py
+def fidelity_promo(order: Order) -> Decimal:  
+    """5% discount for customers with 1000 or more fidelity points"""
+    if order.customer.fidelity >= 1000:
+        return order.total() * Decimal('0.05')
+    return Decimal(0)
+
+
+def bulk_item_promo(order: Order) -> Decimal:
+    """10% discount for each LineItem with 20 or more units"""
+    discount = Decimal(0)
+    for item in order.cart:
+        if item.quantity >= 20:
+            discount += item.total() * Decimal('0.1')
+    return discount
+
+
+def large_order_promo(order: Order) -> Decimal:
+    """7% discount for orders with 10 or more distinct items"""
+    distinct_items = {item.product for item in order.cart}
+    if len(distinct_items) >= 10:
+        return order.total() * Decimal('0.07')
+    return Decimal(0)
+```
+
+para usarla:
+
+```ps
+Order(joe, cart, fidelity_promo)  
+<Order total: 42.00 due: 42.00>
+```
+
+## Globals
+
+Vamos a añadir una capacidad a la clase, la de aplicar la promoción más beneficiosa entre todas las disponibles.
+
+Usamos `globals` para recuperar todos los items del modulo. Necesitamos aplicar un criterio de nomenclatura, que las funciones tengan comio sufijo `_promo`:
+
+```py
+from decimal import Decimal
+from strategy import Order
+from strategy import (
+    fidelity_promo, bulk_item_promo, large_order_promo  
+)
+
+promos = [promo for name, promo in globals().items()  
+                if name.endswith('_promo') and        
+                   name != 'best_promo'               
+]
+
+
+def best_promo(order: Order) -> Decimal:              
+    """Compute the best discount available"""
+    return max(promo(order) for promo in promos)
+```
+
+
+## Introspection
+
+Una alternativa a usar globals sería emplear introspection:
+
+```py
+from decimal import Decimal
+import inspect
+```
+
+Recuperamos todos los items que sean funciones del módulo llamado `promotions`. Aquí el criterio es el de registrar todas las promociones en el módulo `promotions`.
+
+```py
+from strategy import Order
+import promotions
+
+promos = [func for _, func in inspect.getmembers(promotions, inspect.isfunction)]
+
+def best_promo(order: Order) -> Decimal:
+    """Compute the best discount available"""
+    return max(promo(order) for promo in promos)
+```
+
+## Decorador
+
+Podemos identificar las promociones usando un decorador. Definimos una lista que contendrá todas las Promociones, definidas estas como funciones que toman una _Order_ como argumento y retornan un _Decimal_:
+
+```py
+Promotion = Callable[[Order], Decimal]
+
+promos: list[Promotion] = []  
+```
+
+Definimos la anotación:
+
+```py
+def promotion(promo: Promotion) -> Promotion:  
+    promos.append(promo)
+    return promo
+```
+
+ahora ya solo queda anotar las promociones:
+
+```py
+def best_promo(order: Order) -> Decimal:
+    """Compute the best discount available"""
+    return max(promo(order) for promo in promos)  
+
+@promotion  
+def fidelity(order: Order) -> Decimal:
+    """5% discount for customers with 1000 or more fidelity points"""
+    if order.customer.fidelity >= 1000:
+        return order.total() * Decimal('0.05')
+    return Decimal(0)
+
+@promotion
+def bulk_item(order: Order) -> Decimal:
+    """10% discount for each LineItem with 20 or more units"""
+    discount = Decimal(0)
+    for item in order.cart:
+        if item.quantity >= 20:
+                     discount += item.total() * Decimal('0.1')
+    return discount
+
+@promotion
+def large_order(order: Order) -> Decimal:
+    """7% discount for orders with 10 or more distinct items"""
+    distinct_items = {item.product for item in order.cart}
+    if len(distinct_items) >= 10:
+        return order.total() * Decimal('0.07')
+    return Decimal(0)
+```
+
+# <a name="ABC">Clases Abstractas</a>
+
+![ABCs](./imagenes/ABCs.png)
+
+- __Iterable, Container, Sized__
+
+__Every collection should either inherit from these ABCs or implement compatible protocols__. __Iterable__ supports iteration with `__iter__`, __Container__ supports the in operator with `__contains__`, and __Sized__ supports len() with `__len__`.
+
+- __Collection__
+
+This ABC __has no methods of its own__, but was added in Python 3.6 __to make it easier to subclass from Iterable, Container, and Sized__.
+
+- __Sequence, Mapping, Set__
+
+These are the __main immutable collection types__, and each has a mutable subclass.
+
+![Secuencias](./imagenes/Secuencias.png)
+
+- __MappingView__
+
+In Python 3, the __objects returned from the mapping methods .items(), .keys(), and .values() implement the interfaces defined in ItemsView, KeysView, and ValuesView__, respectively. The first two also implement the rich interface of Set, with all the operators we saw in “Set Operations”.
+
+- __Iterator__
+
+Note that iterator subclasses Iterable.
+
+- __Callable, Hashable__
+
+These are not collections, but collections.abc was the first package to define ABCs in the standard library, and these two were deemed important enough to be included. They support type checking objects that must be callable or hashable.
+
+## Implementation tips
+
+- An abstract method can actually have an implementation. Even if it does, subclasses will still be forced to override it, but they will be able to invoke the abstract method with super(), adding functionality to it instead of implementing from scratch. 
+- The best way to declare an ABC is to subclass abc.ABC or any other ABC
+- A __virtual subclass of an ABC__. This is done by calling a register class method on the ABC. The registered class then becomes a virtual subclass of the ABC, and will be recognized as such by issubclass, but it does not inherit any methods or attributes from the ABC.
+
+```py
+from random import randrange
+
+from tombola import Tombola
+
+@Tombola.register  
+class TomboList(list):  
+
+    def pick(self):
+        if self:  
+            position = randrange(len(self))
+            return self.pop(position)  
+        else:
+            raise LookupError('pop from empty TomboList')
+
+    load = list.extend
+
+    def loaded(self):
+        return bool(self)  
+
+    def inspect(self):
+        return tuple(self)
+```
+
+__Tombolist is registered as a virtual subclass of Tombola__. Tombolist __extends list__. Tombolist inherits its boolean behavior from list, and that returns True if the list is not empty. __Tombolist.load is the same as list.extend__. We could also have registered the virtual class as follows:
+
+```py
+Tombola.register(TomboList)
+```
+
+# <a name="protocolo">Protocolos</a>
+
+Para implementar un protocolo la clase tiene que heredar de `typing.Protocol`. En este ejemplo `Repeatable` es cualquier cosa que incluya un método `__mul__` que permita multiplicar un tipo `T` por un entero y retornar `T`:
+
+```py
+from typing import TypeVar, Protocol
+
+T = TypeVar('T')  
+
+class Repeatable(Protocol):
+    def __mul__(self: T, repeat_count: int) -> T: ...  
+```
+
+Podemos usar el tipo en cualquier definición, por ejemplo, para definir una función:
+
+```py
+RT = TypeVar('RT', bound=Repeatable)  
+
+def double(x: RT) -> RT:  
+    return x * 2
+```
+
+When defining a typing.Protocol subclass, you can use the @runtime_checkable decorator to make that protocol support isinstance/issubclass checks at runtime
+
+```py
+@runtime_checkable
+class SupportsComplex(Protocol):
+    """An ABC with one abstract method __complex__."""
+    __slots__ = ()
+
+    @abstractmethod
+    def __complex__(self) -> complex:
+        pass
+```
+
+Si necesitamos un Protocolo que herede de otro protocolo, tenemos que incluir como base la clase de la que queremos heredar __y el propio Protocolo__:
+
+```py
+from typing import Protocol, runtime_checkable
+from randompick import RandomPicker
+
+@runtime_checkable  
+class LoadableRandomPicker(RandomPicker, Protocol):  
+    def load(self, Iterable) -> None: ...  
+```
