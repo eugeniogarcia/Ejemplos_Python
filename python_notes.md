@@ -3,7 +3,6 @@
 - [Colas](#colas)
 - [Pattern Matching](#patron)
 - [Copia de objetos. Shallow y Deep Copy](#copia)
-- [Métodos especiales](#esp)
 - [Diccionarios](#dicc)
 - [Sets](#set)
 - [Crear clases](#clases)
@@ -120,6 +119,26 @@ def get_creators(record: dict) -> list:
             return [name]
         case _:  
             raise ValueError(f'Invalid record: {record!r}')
+```
+
+
+
+## Contexto
+
+Con el contexto tenemos acceso a varias propiedades, entre ellas al número de decimales a utilizar por defecto:
+
+```py
+import decimal
+ctx = decimal.getcontext()  
+ctx.prec = 40  
+one_third = decimal.Decimal('1') / decimal.Decimal('3')  
+one_third  
+Decimal('0.3333333333333333333333333333333333333333')
+
+ctx.prec = 28  
+
+one_third == +one_third  
+False
 ```
 
 ## <a name="copia">Copy</a>
@@ -245,59 +264,7 @@ id(bus1.passengers), id(bus2.passengers), id(bus3.passengers)
 
 Los argumentos se pasan a las funciones siempre por referencia. Esto significa que cuando los argumentos se refieran a tipos mutables, una modificación del argumento será _visible_ fuera del método.
 
-# <a name="esp">Special methods</a>
 
-The `__builtins__.__dict__` stores all built-in types, objects, and functions.
-
-## `__iadd__` y `__add__`
-
-The special method that makes += work is `__iadd__` (for “in-place addition”). However, if. `__iadd__` is not implemented, Python falls back to calling `__add__`.
-
-## Hasheable
-
-An object is hashable if it has a hash code which never changes during its lifetime (it needs a `__hash__()` method), and can be compared to other objects (it needs an `__eq__()` method). Hashable objects which compare equal must have the same hash code
-
-## Lista
-
-```py
-    def __len__(self):
-        return len(self._cards)
-
-    def __getitem__(self, position):
-        return self._cards[position]
-```
-
-## `__call__`
-
-Para crear un tipo como callable se implementa \_\_call\_\_:
-
-```py
-import random
-
-class BingoCage:
-
-    def __init__(self, items):
-        self._items = list(items)  
-        random.shuffle(self._items)  
-
-    def pick(self):  
-        try:
-            return self._items.pop()
-        except IndexError:
-            raise LookupError('pick from empty BingoCage')  
-
-    def __call__(self):  
-        return self.pick()
-
-bingo = BingoCage(range(3))
-bingo.pick()
-```
-
-Podemos hacer usar `bingo` como si se tratara de una función:
-
-```py
-bingo()
-```
 
 # <a name="dicc">Diccionario</a>
 
@@ -656,7 +623,120 @@ Coordinate(lat=0, lon=0, reference='WGS84')
 Coordinate._field_defaults
 {'reference': 'WGS84'}
 ```
- 
+
+## Clases como objetos
+
+En una clase hay una sería de métodos _mágicos_ asociados a la definición de una clase:
+
+- `inst.__class__`. En una instancia nos dice cual es la clase a partir de la que se instanció el objeto
+- `cls.__bases__`. Clase base
+- `cls.__subclasses__`. Lista de subclases de un objeto
+- `cls.__name__`. En un objeto nos dice cual es su nombre 
+- `cls.__qualname__`.  Nombre cualificado de una clase - incluye el módulo separado por puntos
+- `cls.__mro__`. Method Resolution Order de una clase. Orden en el que el interprete irá recorriendo la jerarquía de una clase para resolver los métodos
+
+## Special methods
+
+The `__builtins__.__dict__` stores all built-in types, objects, and functions.
+
+### `__iadd__` y `__add__`
+
+The special method that makes += work is `__iadd__` (for “in-place addition”). However, if. `__iadd__` is not implemented, Python falls back to calling `__add__`.
+
+### Hasheable
+
+An object is hashable if it has a hash code which never changes during its lifetime (it needs a `__hash__()` method), and can be compared to other objects (it needs an `__eq__()` method). Hashable objects which compare equal must have the same hash code
+
+### Lista
+
+```py
+    def __len__(self):
+        return len(self._cards)
+
+    def __getitem__(self, position):
+        return self._cards[position]
+```
+
+### `__call__`
+
+Para crear un tipo como callable se implementa \_\_call\_\_:
+
+```py
+import random
+
+class BingoCage:
+
+    def __init__(self, items):
+        self._items = list(items)  
+        random.shuffle(self._items)  
+
+    def pick(self):  
+        try:
+            return self._items.pop()
+        except IndexError:
+            raise LookupError('pick from empty BingoCage')  
+
+    def __call__(self):  
+        return self.pick()
+
+bingo = BingoCage(range(3))
+bingo.pick()
+```
+
+Podemos hacer usar `bingo` como si se tratara de una función:
+
+```py
+bingo()
+```
+
+### Operadores unarios
+
+```py
+def __abs__(self):
+    return math.hypot(*self)
+
+def __neg__(self):
+    return Vector(-x for x in self)  
+
+def __pos__(self):
+    return Vector(self)
+```
+
+### Operadores
+
+#### Suma y multiplicación
+
+Cuando hacemos `a + b` lo que se hace es lo siguiente:
+1) Si se dispone de `__add__` se ejecuta `a.__add__(b)`. Si el resultado es `NotImplemented` se sigue con 3), en caso contrario se devuelve el resultado
+2) Si no se dispone de `__add__` se sigue con 3)
+3) Se comprueba si existe `__radd__`, y si existe se ejecuta `b.__radd__(a)`. Si el resultado es `NotImplemented` se lanza la excepción `TypeError`, en caso contrario se devuelve el resultado
+4) Si no se dispone de `__3add__` se lanza la excepción `TypeError`
+
+Veamos un ejemplo con `*` y `+`. En `__mul__` se devuelve `NotImplemented`:
+
+```py
+def __add__(self, other):  
+    pairs = itertools.zip_longest(self, other, fillvalue=0.0)
+    return Vector(a + b for a, b in pairs)
+
+def __radd__(self, other):  
+    return self + other```
+
+def __mul__(self, scalar):
+    try:
+        factor = float(scalar)
+    except TypeError:  
+        return NotImplemented  
+    return Vector(n * factor for n in self)
+
+def __rmul__(self, scalar):
+    return self * scalar
+```
+
+#### operador @ - multiplicación de matrices, vectores
+
+El operador `@` se implementa con `__matmul__`, `__rmatmul__`, y `__imatmul__`.
+
 # <a name="func">Functional programming</a>
 
 Una función que acepta como argumento una función y/o devuelve una función. _Reduce_ toma una función y retorna un valor:
@@ -1050,6 +1130,29 @@ Indicamos la lista de argumentos y el tipo que devuelbe la función:
 ```py
 def repl(input_fn: Callable[[Any], str] = input) -> None:
 ```
+
+## Overload de métodos
+
+El decorador `@overload` permite describir funciones que tienen diferentes firmas de modo que el type checker las interprete correctamente. Se utiliza como sigue:se incluye una serie de firmas todas ellas anotadas, seguidas por una definición de la función que no estará anotada, y que será la que se utilice:
+
+```py
+@overload
+def hello(s: int) -> str:
+    ...
+
+@overload
+def hello(s: str) -> str:
+    ...
+
+def hello(s):
+    if isinstance(s, int):
+        return "Got an integer!"
+    if isinstance(s, str):
+        return "Got a string"
+    raise ValueError('You must pass either int or str')
+```
+
+Aquí `...` es la `elipsis`.
 
 # <a name="dec">Decorators</a>
 
@@ -1489,6 +1592,157 @@ def large_order(order: Order) -> Decimal:
     if len(distinct_items) >= 10:
         return order.total() * Decimal('0.07')
     return Decimal(0)
+```
+
+## Slices
+
+El slice es un tipo propiamente dicho. Para soportar slices en una clase tendremos que implementar `__getitem__`. Veamos un ejemplo:
+
+```py
+def __getitem__(self, key):
+        if isinstance(key, slice):  
+            cls = type(self)  
+            return cls(self._components[key])  
+        index = operator.index(key)  
+        return self._components[index]
+```
+
+En este ejemplo comprobamos si la `key` es un `slice`, 
+
+```py
+if isinstance(key, slice):
+```
+
+y si lo es instanciamos un objeto del mismo tipo con los datos que corresponden al slice:
+
+```py
+#Tipo
+cls = type(self)
+#Instanciamos el tipo. Es decir, estamos retornando otra instancia de self, con los datos correspondientes al slice  
+return cls(self._components[key])  
+```
+
+y en caso contrario, simplemente retornamos el valor:
+
+```py
+index = operator.index(key)  
+return self._components[index]
+```
+
+la diferencia de usar `operator.index(key)` en lugar de `int(key)` es que con `index` si el argumento no es un entero se lanza una excepción. 
+
+## Atributos dinámicos
+
+El método `__getattr__` se invoca cuando el interprete de python no encuentra el atributo. El interprete busca en el atributo de la siguiente forma. Supongamos que hacemos `my_obj.x`, el interprete hará lo siguiente:
+
+- Comprueba si existe el atributo my_obj.x - anotado con @property
+- En caso contrario busca si tenemos el atributo estático definido en my_obj.__class__
+- En caso contrario hace la misma búsqueda en los padres de la clase - siguiento la jerarquía
+- Sino se encuentra el atributo, se llama al método `__getattr__` para recuperar el atributo
+
+En este ejemplo hacemos que podamos acceder a los atributos `'x', 'y', 'z' o 't'` de este objeto, pero sin haber definido estas propiedades previamente - lo que hemos llamado atributo dinámico:
+
+```py
+__match_args__ = ('x', 'y', 'z', 't')  
+
+def __getattr__(self, name):
+    cls = type(self)  
+    try:
+        pos = cls.__match_args__.index(name)  
+    except ValueError:  
+        pos = -1
+    if 0 <= pos < len(self._components):  
+        return self._components[pos]
+    msg = f'{cls.__name__!r} object has no attribute {name!r}'  
+    raise AttributeError(msg)
+```
+
+En primer lugar comprobamos si el atributo que buscamos se encuentra en la variable de clase - estática - `__match_args__`:
+
+```py
+cls = type(self)  
+    try:
+        pos = cls.__match_args__.index(name) 
+```
+
+si está, comprobamos que tenemos suficientes valores en el array, y en caso afirmativo retornamos ese valor:
+
+```py
+if 0 <= pos < len(self._components):  
+    return self._components[pos]
+```
+
+en caso contrario lanzamos una excepción - observemos como usamos un _f-string_ -:
+
+```py
+msg = f'{cls.__name__!r} object has no attribute {name!r}'  
+raise AttributeError(msg)
+```
+
+Habitualmente cuando se implementa `__getattr__` se suele acompañar con la definición de `__setattr__`, porque de lo contrario se introducen algunas inconsistencias. Por ejemplo, si en la clase para la que hemos implementado el `__getattr__` anterior hicieramos `my_obj.t=20`, ¿qué sucedería?. Aparentemente habríamos conseguido nuestro objetivo, si hicieramos print('f{my_obj.t}') se imprimiría `20`, pero al mismo tiempo, si vieramos `self._components` observaríamos que no se habría hecho ningún cambio. 
+
+Lo que sucede aquí es que como el atributo no esta definido en la clase, se creará. Cuando hagamos `my_obj.t` recuperaremos este valor, pero `self._components` en realidad no se ha cambiado. Para evitar esta incosistencia tendríamos que implementar también `__setattr__`. En este ejemplo _impedimos_ que se pueda setear un atributo `'x', 'y', 'z' o 't'`:
+
+```py
+def __setattr__(self, name, value):
+    cls = type(self)
+    if len(name) == 1:  
+        if name in cls.__match_args__:  
+            error = 'readonly attribute {attr_name!r}'
+        elif name.islower():  
+            error = "can't set attributes 'a' to 'z' in {cls_name!r}"
+        else:
+            error = ''  
+        if error:  
+            msg = error.format(cls_name=cls.__name__, attr_name=name)
+            raise AttributeError(msg)
+    super().__setattr__(name, value) 
+```
+
+## Uso de map y reduce
+
+Veamos como podemos usar _reduce_ para implementar `__hash__`:
+
+```py
+from array import array
+import reprlib
+import math
+import functools  
+import operator  
+
+class Vector:
+    typecode = 'd'
+
+    # many lines omitted in book listing...
+
+    def __eq__(self, other):  
+        return tuple(self) == tuple(other)
+    
+     def __hash__(self):
+        hashes = (hash(x) for x in self._components)  
+        return functools.reduce(operator.xor, hashes, 0)
+```
+
+Creamos una lista con los _hash_ de cada elemento, y calculamos el _xor_ de todos ellos. Es equivalente á:
+
+```py
+def __hash__(self):
+    hashes = map(hash, self._components)
+    return functools.reduce(operator.xor, hashes)
+```
+
+## `__eq__` eficiente usando __zip__
+
+En el método `__eq__` estamos usando tuple para crear, una tuple que nos permita luego hacer una comparación _directa_. Esto no es muy eficaz porque estamos alocando una tupla solamente para hacer esta comparación. Una forma alternativa es usar _zip_:
+
+```py
+def __eq__(self, other):
+    if len(self) != len(other):  
+        return False
+    for a, b in zip(self, other):  
+        if a != b:  
+            return False
+    return True  
 ```
 
 # <a name="ABC">Clases Abstractas</a>
