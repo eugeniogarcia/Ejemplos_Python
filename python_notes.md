@@ -2119,3 +2119,84 @@ def gen():
 
 # <a name="ctx_manager")>Context Managers</a>
 
+Con `with' creamos un contexto temporal que proporciona una lógica de creación y otra de destrucción. El interface que implementa un contexto consiste de los métodos `__enter__` y `__exit__`. Veamos un ejemplo:
+
+```py
+class LookingGlass:
+
+    def __enter__(self):  
+        import sys
+        self.original_write = sys.stdout.write  
+        sys.stdout.write = self.reverse_write  
+        return 'JABBERWOCKY'  
+
+    def reverse_write(self, text):  
+        self.original_write(text[::-1])
+
+    def __exit__(self, exc_type, exc_value, traceback):  
+        import sys  
+        sys.stdout.write = self.original_write  
+        if exc_type is ZeroDivisionError:  
+            print('Please DO NOT divide by zero!')
+            return True
+```
+
+Cuando usemos este contexto:
+
+```py
+with LookingGlass() as what:  
+    print('Alice, Kitty and Snowdrop')  
+    print(what)
+```
+
+Cuando se declara el bloque, el resultado de ejecutar la función `__enter__` se guarda en `what`. Cuando se termina la ejecución del bloque se ejecuta `__exit__`. En el ejemplo anterior cambiamos el `sys.stdout.write` por una función que escribe las cosas al reves. `what` tomará el valor `JABBERWOCKY`. Los dos prints que tenemos dentro del bloque impremen las cosas al revés:
+
+```ps
+pordwonS dna yttiK ,ecilA  
+YKCOWREBBAJ
+```
+
+Cuando el bloque termina, con `__exit__` se restauran las cosas:
+
+```ps
+what  
+'JABBERWOCKY'
+
+print('Back to normal.')  
+Back to normal.
+```
+
+## Utilidades contextlib
+
+En el módulo `contextlib` se definen una serie de contextos estandard:
+
+- closing. A function to build context managers out of objects that provide a close() method but don’t implement the __enter__/__exit__ interface.
+- suppress. A context manager to temporarily ignore exceptions given as arguments.
+- nullcontext. A context manager wrapper that does nothing
+- ExitStack. A context manager that lets you enter a variable number of context managers. When the with block ends, ExitStack calls the stacked context managers’ __exit__ methods in LIFO order 
+- @contextmanager. The @contextmanager decorator reduces the boilerplate of creating a context manager: instead of writing a whole class with __enter__/__exit__ methods, you just implement a generator with a single yield that should produce whatever you want the __enter__ method to return
+
+### Anotación @contextmanager
+
+Con esta anotación decoramos una función "generator". `__enter__` se corresponderá a la ejecución del generador hasta `yield`, siendo el valor que devuelve yield el que incializa la variable trás el _as_. Al salir del contexto, el `__exit__` es equivalente a ejecutar `next`:   
+
+```py
+@contextlib.contextmanager
+def looking_glass():
+    import sys
+    original_write = sys.stdout.write
+
+    def reverse_write(text):
+        original_write(text[::-1])
+
+    sys.stdout.write = reverse_write
+    msg = ''  
+    try:
+        yield 'JABBERWOCKY'
+    except ZeroDivisionError:  
+        msg = 'Please DO NOT divide by zero!'
+    finally:
+        sys.stdout.write = original_write  
+        if msg:
+            print(msg)
+```
