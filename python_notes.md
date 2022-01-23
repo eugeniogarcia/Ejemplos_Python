@@ -12,6 +12,8 @@
 - [Caso práctico de Modelado de Objetos](#modelado)
 - [Clases Abstractas](#ABC)
 - [Protocolos](#protocol)
+- [Iterables](#iterable)
+- [Context Managers](#ctx_manager)
 
 # Varios
 
@@ -1811,6 +1813,48 @@ __Tombolist is registered as a virtual subclass of Tombola__. Tombolist __extend
 Tombola.register(TomboList)
 ```
 
+## Structural Typing
+
+ABC se usan habitualmente creando subclases. Cuando en tiempo de ejecución hacemos `issubclass(AnABC, Sub)` retornará True. Structural typing por el contrario consiste no en implementar explicitamente una subclase, pero implementar los métodos que "hacen de la clase" implementación de la ABC.
+
+Para implementar Structural Typing tenemos que implementar un magic method, `__subclasshook__`.
+
+```py
+class Sized(metaclass=ABCMeta):
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __len__(self):
+        return 0
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Sized:
+            if any("__len__" in B.__dict__ for B in C.__mro__):  
+                return True  
+        return NotImplemented
+```
+
+Aquí estamos indicando que cualquier clase que implemente el método `__len__` se considere una implementación de `Sized`.
+
+```py
+class Struggle:
+    def __len__(self): return 23
+```
+
+Podemos ver como a pesar de que Struggle no es una subclase de _Sized_, cuando hacemos las comprobaciones el interprete la reconoce como una de los _suyos_:
+
+```ps
+from collections import abc
+
+isinstance(Struggle(), abc.Sized)
+True
+
+issubclass(Struggle, abc.Sized)
+True
+```
+
 # <a name="protocolo">Protocolos</a>
 
 Para implementar un protocolo la clase tiene que heredar de `typing.Protocol`. En este ejemplo `Repeatable` es cualquier cosa que incluya un método `__mul__` que permita multiplicar un tipo `T` por un entero y retornar `T`:
@@ -1856,3 +1900,222 @@ from randompick import RandomPicker
 class LoadableRandomPicker(RandomPicker, Protocol):  
     def load(self, Iterable) -> None: ...  
 ```
+
+# <a name="iterable")>Iterables</a>
+
+Un __iterable__ tiene como misión producir un __iterator__. El interable implementa `__iter__` que devuelbe un iterator. El iterator tiene que implementar un `__iter__` y un `__next__`.
+
+Cuando se crear un iterator se llama a la función `iter`. El inteprete usará entonces `__iter__`, y en caso de no existir a `__getitem__`. Si tampoco tenemos un `__getitem__` el interprete devuelve una excepción `TypeError`.
+
+Para implementar un _Iterable_ no hace crear una subclase ni un prototipo, porque la clase abstracta _abc.Iterable_ implementa el método `__subclasshook__`. Lo podemos comprobar con esta clase:
+
+```py
+class Foo:
+    def __iter__(self):
+        pass
+```
+
+Si hacemos 
+
+```ps
+from collections import abc
+
+issubclass(Foo, abc.Iterable)
+True
+
+f = Foo()
+isinstance(f, abc.Iterable)
+True
+```
+
+Asi está implementado Iterator:
+
+```py
+class Iterator(Iterable):
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __next__(self):
+        'Return the next item from the iterator. When exhausted, raise StopIteration'
+        raise StopIteration
+
+    
+    def __iter__(self):
+        return self
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Iterator:
+            if (any("__next__" in B.__dict__ for B in C.__mro__) and
+                any("__iter__" in B.__dict__ for B in C.__mro__)):
+                return True
+        return NotImplemented
+```
+
+No hay forma de saber si quedan o no items por recuperar en el iterable. La única forma es llamar a `next()` y comprobar si se devuelbe o no la excepción `StopIteration`.
+
+```py
+class SentenceIterator:
+
+    def __init__(self, words):
+        self.words = words  
+        self.index = 0  
+
+    def __next__(self):
+        try:
+            word = self.words[self.index]  
+        except IndexError:
+            raise StopIteration()  
+        self.index += 1  
+        return word  
+
+    def __iter__(self):  
+        return self
+```
+
+## yield
+
+Una función que utiliza `yield` es un generador. Un generador es un intertor. Esta clase es un iterable:
+
+```py
+class Sentence:
+
+    def __init__(self, text):
+        self.text = text
+        self.words = RE_WORD.findall(text)
+
+    def __repr__(self):
+        return 'Sentence(%s)' % reprlib.repr(self.text)
+    
+    def __iter__(self):
+        for word in self.words:  
+            yield word  
+        return 
+```
+
+Cuando llamamos a una función que contiene `yield` se crea un generador:
+
+```py
+def gen_123():  
+    yield 1  
+    yield 2
+    yield 3
+```
+
+creamos el generador:
+
+```ps
+i=gen_123()   # doctest: +ELLIPSIS
+<generator object gen_123 at 0x...>
+```
+
+podemos empezar a usarle:
+
+```ps
+next(i)
+```
+
+## Módulo _itertools_
+
+El módulo _itertools_ contiene generadores estándard que podemos usar y combinar.
+
+|Función|Descripción|
+|------|------|
+|compress(it, selector_it)|Consumes two iterables in parallel; yields items from it whenever the corresponding item in selector_it __is truthy__|
+|dropwhile(predicate, it)|Consumes it __skipping items while predicate computes truthy__, then yields every remaining item (no further checks are made)|
+|filter(predicate, it) es built-in, no viene en itertools|Applies predicate to each item of iterable, yielding the item if predicate(item) is truthy; if predicate is None, only truthy items are yielded|
+|filterfalse(predicate, it)|Same as filter, with the predicate logic negated: yields items whenever predicate computes falsy|
+|islice(it, stop) or islice(it, start, stop, step=1)|__Yields items from a slice of it__, similar to s[:stop] or s[start:stop:step] except it can be any iterable, and the operation is lazy|
+|takewhile(predicate, it)|__Yields items while predicate computes truthy__, then stops and no further checks are made|
+|accumulate(it, [func])|__Yields accumulated sums__; __if func is provided, yields the result of applying it to the first pair of items, then to the first result and next item__, etc.|
+|enumerate(iterable, start=0) es built-in, no viene en itertools|__Yields 2-tuples of the form (index, item)__, where index is counted from start, and item is taken from the iterable|
+|map(func, it1, [it2, …, itN]) es built-in, no viene en itertools|__Applies func to each item of it__, yielding the result; if N iterables are given, func must take N arguments and the iterables will be consumed in parallel|
+|starmap(func, it)|Applies func to each item of it, yielding the result; the input iterable should yield iterable items iit, and func is applied as func(*iit)|
+|chain(it1, …, itN)|__Yield all items from it1, then from it2 etc.__, seamlessly|
+|chain.from_iterable(it)|__Yield all items from each iterable produced by it__, one after the other, seamlessly; it should yield iterable items, for example, a list of iterables|
+|product(it1, …, itN, repeat=1)|Cartesian product: __yields N-tuples made by combining items from each input__ iterable like nested for loops could produce; repeat allows the input iterables to be consumed more than once|
+|zip(it1, …, itN) es built-in, no viene en itertools|__Yields N-tuples__ built from items taken from the iterables in parallel, silently stopping when the first iterable is exhausted|
+|zip_longest(it1, …, itN, fillvalue=None)|__Yields N-tuples__ built from items taken from the iterables in parallel, __stopping only when the last iterable is exhausted__, filling the blanks with the fillvalue|
+|combinations(it, out_len)|Yield combinations of out_len items from the items yielded by it|
+|combinations_with_replacement(it, out_len)|Yield combinations of out_len items from the items yielded by it, including combinations with repeated items|
+|count(start=0, step=1)|__Yields numbers starting at start, incremented by step, indefinitely__|
+|cycle(it)|Yields items from it storing a copy of each, __then yields the entire sequence repeatedly__, indefinitely|
+|permutations(it, out_len=None)|Yield permutations of out_len items from the items yielded by it; by default, out_len is len(list(it))|
+|repeat(item, [times])|Yield the given item repeatedly, __indefinitely unless a number of times__ is given|
+|groupby(it, key=None)|Yields 2-tuples of the form (key, group), where key is the grouping criterion and group is a generator yielding the items in the group|
+|reversed(seq) es built-in, no viene en itertools|Yields items from seq in reverse order, from last to first; seq must be a sequence or implement the __reversed__ special method|
+|tee(it, n=2)|Yields a tuple of n generators, each yielding the items of the input iterable independently|
+|all(it) es built-in, no viene en itertools|Returns True if all items in it are truthy, otherwise False; all([]) returns True|
+|any(it) es built-in, no viene en itertools|Returns True if any item in it is truthy, otherwise False; any([]) returns False|
+|max(it, [key=,] [default=]) es built-in, no viene en itertools|Returns the maximum value of the items in it;a key is an ordering function, as in sorted; default is returned if the iterable is empty|
+|min(it, [key=,] [default=]) es built-in, no viene en itertools|Returns the minimum value of the items in it.b key is an ordering function, as in sorted; default is returned if the iterable is empty|
+|reduce(func, it, [initial])|Returns the result of applying func to the first pair of items, then to that result and the third item and so on; if given, initial forms the initial pair with the first item|
+
+Ejemplos:
+
+```ps
+ist(itertools.compress('Aardvark', (1,0,1,1,0,1)))
+['A', 'r', 'd', 'a']
+
+list(itertools.islice('Aardvark', 4, 7))
+['v', 'a', 'r']
+
+sample = [5, 4, 2, 8, 7, 6, 3, 0, 9, 1]
+list(itertools.accumulate(sample))  
+[5, 9, 11, 19, 26, 32, 35, 35, 44, 45]
+
+list(itertools.accumulate(sample, min))  
+[5, 4, 2, 2, 2, 2, 2, 0, 0, 0]
+
+list(itertools.accumulate(sample, max))  
+[5, 5, 5, 8, 8, 8, 8, 8, 9, 9]
+
+list(itertools.chain('ABC', range(2)))  
+['A', 'B', 'C', 0, 1]
+
+list(itertools.chain(enumerate('ABC')))  
+[(0, 'A'), (1, 'B'), (2, 'C')]
+
+list(zip('ABC', range(5)))  
+[('A', 0), ('B', 1), ('C', 2)]
+
+list(itertools.zip_longest('ABC', range(5)))  
+[('A', 0), ('B', 1), ('C', 2), (None, 3), (None, 4)]
+
+list(itertools.zip_longest('ABC', range(5), fillvalue='?'))  
+[('A', 0), ('B', 1), ('C', 2), ('?', 3), ('?', 4)]
+```
+
+## sub-generators
+
+Podemos anidar generadores de forma que conformen uno solo:
+
+```py
+def sub_gen():
+    yield 1.1
+    yield 1.2
+
+def gen():
+    yield 1
+    yield from sub_gen()
+    yield 2
+```
+
+En caso de que el subgenerador devuelva datos con _return_, cuando hagamos `yield from` recibiremos ese valor:
+
+```py
+def sub_gen():
+    yield 1.1
+    yield 1.2
+    return 'Done!'
+
+def gen():
+    yield 1
+    result = yield from sub_gen()
+    print('<--', result)
+    yield 2
+```
+
+# <a name="ctx_manager")>Context Managers</a>
+
