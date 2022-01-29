@@ -14,6 +14,7 @@
 - [Protocolos](#protocol)
 - [Iterables](#iterable)
 - [Context Managers](#ctx_manager)
+- [Corutinas](#corutina)
 
 # Varios
 
@@ -2199,4 +2200,108 @@ def looking_glass():
         sys.stdout.write = original_write  
         if msg:
             print(msg)
+```
+
+# <a name="corutina")>Corutinas</a>
+
+Las co-rutinas implementa un modo de concurrencia que esta basado no en la creación de threads nativos del SSOO sino en el uso de un event loop. Esto hace que el overhead de ejecutar una corutina vs el de utilizar un thread nativo sea mucho menor.
+
+La forma en la que se implementan las corutinas es con un _generador_ - función que usa el comando _yield_ -, pero con la particularidad de que _yield_ se convierte en una camino de dos sentidos, no solo recuperamos datos, sino que podemos pasar datos a yield.
+
+Tenemos que distinguir este tipo de corutinas, _generator based corutines_ de las que se denominan _native based coroutines_. Estas últimas se implementan con _async def_ y _await_.
+
+## Generator base corutines
+
+Veamos una corutina de este tipo:
+
+```py
+def averager():
+    total = 0.0
+    count = 0
+    average = None
+    while True:  
+        term = yield average  
+        total += term
+        count += 1
+        average = total/count
+```
+
+Como cualquier generador, llamaremos a la función _averager()_ para crear un generador. A continuación lo tendremos que inicializar llamando a _next_. Al llamar a _next_ se ejecutar el generado hasta el primer _yield_, que retornara el valor definido - en nuestro ejemplo _None_. En este punto la corutina esta lista para ser invocada. La invocamos haciendo _send(argumento)_. El argumento que indiquemos se recibira en el generador - informado en este ejemplo la variable _term_ -, y el generador se ejecutar hasta el siguiente _yield_ o hasta el final, el return del generador.
+
+La api nos permite también conocer en todo momento cual es el estado del generador usando el método _inspect.getgeneratorstate_. Los estados posibles son:
+- GEN_CREATED. Hemos inicializado el generador llamando a _next_, y aún no hemos llamado a _send_
+- GEN_RUNNING. Acabamos de llamar a _send_, y el generador está ejecutandose - no ha llegado a _yield_, _return_ o a lanzado una excepción
+- GEN_SUSPENDED. Cuando el generador llega a un _yield_ y espera a que se llame al método _send_
+- GEN_CLOSED. El generador termina la ejecución - sale por return o por una excepción
+
+Es fundamental que antes de usar la corutina se inicialice. Podemos crear un decorador para hacer esto:
+
+```py
+from functools import wraps
+
+def coroutine(func):
+    """Decorator: primes `func` by advancing to first `yield`"""
+    @wraps(func)
+    def primer(*args,**kwargs):  # <1>
+        gen = func(*args,**kwargs)  # <2>
+        next(gen)  # <3>
+        return gen  # <4>
+    return primer
+```
+
+podemos anotar nuestro generador:
+
+```py
+from a_coroutil import coroutine
+
+@coroutine  # <5>
+def averager():  # <6>
+    total = 0.0
+    count = 0
+    average = None
+    while True:
+        term = yield average
+        total += term
+        count += 1
+        average = total/count
+```
+
+esto hace que se puede utilizar nada más crearlo.
+
+```py
+from coroaverager1 import averager
+
+coro_avg = averager()
+coro_avg.send(40) 
+```
+
+La api nos ofrece un par de métodos más que nos permiten terminar una corutina, o provocar una excepción en ella:
+- generator.close()
+
+```py
+exc_coro = demo_exc_handling()
+next(exc_coro)
+exc_coro.send(11)
+```
+
+```py
+#Paramos
+exc_coro.close()
+```
+
+- generator.throw(exc_type[, exc_value[, traceback]]). Se 
+
+```py
+#Lanzamos excepción
+exc_coro.throw(DemoException)
+```
+
+Por último indicar como definir un genérico que podamos usar en una corutina de tipo generator.
+
+```py
+T_co = TypeVar('T_co', covariant=True)
+V_co = TypeVar('V_co', covariant=True)
+T_contra = TypeVar('T_contra', contravariant=True)
+
+class Generator(Iterator[T_co], Generic[T_co, T_contra, V_co],extra=_G_base):
 ```
