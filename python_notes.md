@@ -2204,11 +2204,15 @@ def looking_glass():
 
 # <a name="corutina">Corutinas</a>
 
-Las co-rutinas implementa un modo de concurrencia que esta basado no en la creación de threads nativos del SSOO sino en el uso de un event loop. Esto hace que el overhead de ejecutar una corutina vs el de utilizar un thread nativo sea mucho menor.
+Vamos a ver diferentes tecnologías:
 
-La forma en la que se implementan las corutinas es con un _generador_ - función que usa el comando _yield_ -, pero con la particularidad de que _yield_ se convierte en una camino de dos sentidos, no solo recuperamos datos, sino que podemos pasar datos a yield.
+- __Threads and Processes__. Estos son los componentes que a nivel de ssoo se encargan de proporcionar concurrencia y paralelismo respectivamente. La forma de crear threads y processes es relativamente similar a como se hace en otros lenguajes, no en vano son primitivas a nivel de ssoo. Un proceso puede tener uno o varios threads, todos ellos compartiendo los recursos del proceso, especificamente el heap de memoria, por lo que es relativamente sencillo intervambiar cualquier tipo de datos entre threads - tomando las precacuiones de sincronización correspondientes usando semaforos, eventos, locks, critical areas, etc. Un proceso ejecutara simultaneamente un solo thread; El interprete garantiza que sea así usando el _GIL_. Los procesos por su parte tienen su propia región de memoria, y son a todos los efectos independientes entre si. Para comunicar entre procesos hay que usar constructs del ssoo como _sockets_ o _pipes_, así que no resulta tan fácil intercambiar datos. Tendremos que serializar y desserializar a cada extremo de la comunicación
 
-Tenemos que distinguir este tipo de corutinas, _generator based corutines_ de las que se denominan _native based coroutines_. Estas últimas se implementan con _async def_ y _await_.
+- __Corutinas clasicas__. Implementan unidades de trabajo que pueden ejecutarse de forma colaborativa para alcanzar un objetivo común. Cada corutina usará __yield__ para ceder el control a otra corutina, entregando - _send()_ - o recibiendo datos en el proceso.
+
+- __Futures__. Nos permite implementar concurrencia y paralelismo de una forma más sencilla a utilizar threads y procesos directamente
+
+- __Corutinas nativas__. Estan optimizadas para tratar workloads que sean __I/O bound__. Un __event loop_ - similar al que se implementa en _node_ - se encarga de procesar las corutinas, esqueduleando cada una de ellas de tal forma que se aprovechen las esperas por I/O para procesar otras corutinas.
 
 ## A Bit of Jargon
 Let’s make sure we are on the same page regarding some core concepts. Here are some terms I will use for the rest of this chapter and the next two.
@@ -2560,7 +2564,90 @@ T_contra = TypeVar('T_contra', contravariant=True)
 class Generator(Iterator[T_co], Generic[T_co, T_contra, V_co],extra=_G_base):
 ```
 
+
+## Futures
+
+Los futures son el equivalente a las _promises_ de javascript. Podemos crear un future por medio de un un _threadpool_ o de un _processpool_. Una vez que tenemos el _pool_ hay varias primitivas para crear el future, pero siempre se crea para ejecutar la lógica definida en una función _normal_, un simple _callable_ - es decir, que no hay que definirlo como *async*. Veamos algunos ejemplos de creación de un pool, y como crear futures a partir de él. En este primer ejemplo usamos _map_:
+
+```py
+from concurrent import futures
+
+from flags import save_flag, get_flag, main  
+
+def download_one(cc: str):  
+    image = get_flag(cc)
+    save_flag(image, f'{cc}.gif')
+    print(cc, end=' ', flush=True)
+    return cc
+
+def download_many(cc_list: list[str]) -> int:
+    with futures.ThreadPoolExecutor() as executor:         
+        res = executor.map(download_one, 
+        sorted(cc_list))  
+
+    return len(list(res))                                  
+
+if __name__ == '__main__':
+    main(download_many)  
+```
+
+Creamos el pool en un _contexto_, lo que nos libera de tener que gestionar su ciclo de vida:
+
+```py
+with futures.ThreadPoolExecutor() as executor:
+```
+
+podemos usar el _executor_ para crear futures, tantos como queramos. Dependiendo de que haya o no workers disponibles en el pool el future se empezara a ejecutar inmediatamente o no. En este ejemplo usamos _map_. Map se comporta de forma parecida a como lo hace en el patron map-reduce, __retorna un iterable__ que podremos usar en cualquier lugar que soporte iterables, desde loops hasta el constructor de una _list_. Cuando se haga _next_ con el iterable se llamará al método _result()_ del future. _Map_ se crea inmediatamente, no es _blocking_, pero cuando se haga _next_ la ejecución se bloqueará hasta que _result()_ termine.
+
+```py
+res = executor.map(download_one, 
+sorted(cc_list))  
+```
+
+Un future tiene los siguientes métodos:
+- _result()_. Bloquea la ejecución hasta obtener la respuesta del future
+- _done()_ nos devuelve un booleano que indica si el future ha terminado o no. No es blocking
+- *add_done_callbacl()*. Nos permite definir un _callback_ que se ejecutara cuando el future haya terminado
+
+Cuando hemos creado el pool no hemos especificado el número de workers, dejando al constructor la discrección de elegir el número de workers - al parecer la fórmula que se usa es `max_workers = min(32, os.cpu_count() + 4)`. En este otro ejemplo elegimos el número de workers, y vamos a usar _submit_ para crear el future. Este método es más flexible que _map_ porque nos permite invocar diferentes _callables_ con los workers:
+
+```py
+def download_many(cc_list: list[str]) -> int:
+    cc_list = cc_list[:5]
+
+    with futures.ThreadPoolExecutor(max_workers=3) as executor:
+        to_do: list[futures.Future] = []
+        for cc in sorted(cc_list):  
+            future = executor.submit(download_one, cc)  
+            to_do.append(future)  
+            print(f'Scheduled for {cc}: {future}')  
+
+        for count, future in enumerate(futures.as_completed(to_do), 1):  
+            #result() nos dara un resultado inmediatamente porque lo estamos usando en convinación con as_completed
+            res: str = future.result()  
+            print(f'{future} result: {res!r}')  
+
+    return count
+```
+
+Los futures son una clase más, y como tal podemos guardarla en todo tipo de estructuras, desde colas, pasando por dicccionarios o en listas. __`futures.as_completed`__ es un método __muy interesante porque nos permite indicar una lista de futures, y nos devuelve un iterable que hace yield del iterable que ha terminado ya__. De esta forma podemos ir viendo el resultado de cada future a medida que va terminando. En este ejemplo, al hacer _result()_ la respuesta será inmediata porque *as_completed* solo devuelve un valor - el _next()_ - cuando el future ha terminado, __y el valor que devuelve es el propio future, no se resultado__.
+
+Usar __multiples procesos__ es igual de sencillo:
+
+```py
+def download_many(cc_list: list[str]) -> int:
+    with futures.ProcessPoolExecutor() as executor:
+```
+
+Podemos usar _map_ y _submit_ como al crear un pool de threads.
+
 ## Async. Corutinas nativas
+
+Las co-rutinas nativas implementan un modo de concurrencia que esta basado no en la creación de threads nativos del SSOO sino en el uso de un event loop. Esto hace que el overhead de ejecutar una corutina vs el de utilizar un thread nativo sea mucho menor.
+
+La forma en la que se implementan las corutinas es con un _generador_ - función que usa el comando _yield_ -, pero con la particularidad de que _yield_ se convierte en una camino de dos sentidos, no solo recuperamos datos, sino que podemos pasar datos a yield.
+
+Tenemos que distinguir este tipo de corutinas, _generator based corutines_ de las que se denominan _native based coroutines_. Estas últimas se implementan con _async def_ y _await_.
 
 En una corutina nativa tenemos varias piezas:
 - Event Loop. Componente que se encarga de procesar corutinas. La corutinas son más livianas que los threads del ooss
@@ -2618,8 +2705,5 @@ except asyncio.CancelledError:
 
 ### Async Context Manager
 
+
 ### Async iterator
-
-## Futures
-
-
