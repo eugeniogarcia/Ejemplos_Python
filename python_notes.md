@@ -1902,7 +1902,7 @@ class LoadableRandomPicker(RandomPicker, Protocol):
     def load(self, Iterable) -> None: ...  
 ```
 
-# <a name="iterable")>Iterables</a>
+# <a name="iterable">Iterables</a>
 
 Un __iterable__ tiene como misión producir un __iterator__. El interable implementa `__iter__` que devuelbe un iterator. El iterator tiene que implementar un `__iter__` y un `__next__`.
 
@@ -2118,7 +2118,7 @@ def gen():
     yield 2
 ```
 
-# <a name="ctx_manager")>Context Managers</a>
+# <a name="ctx_manager">Context Managers</a>
 
 Con `with' creamos un contexto temporal que proporciona una lógica de creación y otra de destrucción. El interface que implementa un contexto consiste de los métodos `__enter__` y `__exit__`. Veamos un ejemplo:
 
@@ -2202,7 +2202,7 @@ def looking_glass():
             print(msg)
 ```
 
-# <a name="corutina")>Corutinas</a>
+# <a name="corutina">Corutinas</a>
 
 Las co-rutinas implementa un modo de concurrencia que esta basado no en la creación de threads nativos del SSOO sino en el uso de un event loop. Esto hace que el overhead de ejecutar una corutina vs el de utilizar un thread nativo sea mucho menor.
 
@@ -2210,7 +2210,260 @@ La forma en la que se implementan las corutinas es con un _generador_ - función
 
 Tenemos que distinguir este tipo de corutinas, _generator based corutines_ de las que se denominan _native based coroutines_. Estas últimas se implementan con _async def_ y _await_.
 
+## A Bit of Jargon
+Let’s make sure we are on the same page regarding some core concepts. Here are some terms I will use for the rest of this chapter and the next two.
+
+- concurrency
+
+The ability to handle multiple pending tasks, __making progress one at a time or in parallel (not necessarily) so that they all eventually succeed or fail. A single-core CPU is capable of concurrency if it runs an OS scheduler that interleaves the execution of the pending tasks__. Also known as multitasking.
+
+- parallelism
+
+The ability to execute __multiple computations at the same time. This requires a multi-core CPU__, a GPU, or multiple computers in cluster.
+
+- process
+
+An __instance of a computer program while it is running, using memory and a slice of the CPU time__. Modern operating systems are able to manage multiple processes concurrently, with each process isolated in its own private memory space. __Processes communicate via pipes, sockets, or memory mapped files—all of which can only carry raw bytes, not live Python objects. A process can spawn sub-processes, each called a child process__. These are also isolated from each other and from the parent.
+
+- thread
+
+__An execution path within a single process. When a process starts, it uses a single thread: the main thread. Using operating system APIs, a process can create more threads that operate concurrently thanks to the operating system scheduler. Threads share the memory space of the process, which holds live Python objects__. This __allows easy communication between threads, but can also lead to corrupted data when more than one thread updates the same object concurrently__.
+
+- contention
+
+Dispute over a limited asset. __Resource contention happens when multiple processes or threads try to access a shared resource—such as a lock or storage__. There’s also CPU contention, when compute-intensive processes or threads must wait for their share of CPU time.
+
+- lock
+
+__An object that threads can use to coordinate and synchronize their actions and avoid corrupting data__. While updating a shared data structure, a thread should hold an associated lock. This makes other well-behaved threads wait until the lock is released before accessing the same data structure. The simplest type of lock is also known as a mutex (for mutual exclusion).
+
+1.  __Each instance of the Python interpreter is a process. You can start additional Python processes using the
+multiprocessing or concurrent.futures libraries. Python’s subprocess library is designed to launch processes to run external programs, regardless of the languages used to write them__.
+
+2. __The Python interpreter uses a single thread to run the user’s program and the memory garbage collector. You can start additional Python threads using the threading or concurrent.futures libraries__.
+
+3. __Access to reference counts and other internal interpreter state is controlled by a lock, the Global Interpreter Lock (GIL). Only one Python thread can hold the GIL at any time. This means that only one Python thread can execute at any time, regardless of the number of CPU cores__.
+
+4. __To prevent a Python thread from holding the GIL indefinitely, Python’s bytecode interpreter pauses the current Python thread every 5ms by default3, releasing the GIL. The thread can then try to reacquire the GIL, but if there are other threads waiting for it, the OS scheduler may pick one of them to proceed__.
+
+5. __When we write Python code, we have no control over the GIL__. But a built-in function or an extension written in C—or any language that interfaces at the Python/C API level—can release the GIL while running time-consuming tasks.
+
+6. __Every Python standard library function that makes a syscall4 releases the GIL. This includes all functions that perform disk I/O, network I/O, and time.sleep()__. Many CPU-intensive functions in the NumPy/SciPy libraries, as well as the compressing/decompressing functions from the zlib and bz2 modules also release the GIL.5
+
+7. Extensions that integrate at the Python/C level can also __launch other non-Python threads__ that are not affected by the GIL. __Such GIL-free threads generally cannot change Python objects, but they can read from and write to the memory underlying array.array or NumPy arrays, which support the buffer protocol__.
+
+## Threads vs Processes
+
+Los threads - y los procesos - se crean de forma similar a como se hace en _java_. Lo que necesitamos es un _callable_ y un mecanismo de comunicación con el thread. El mecanismo elegido es Event. Veamos un ejemplo:
+
+### Thread 
+
+Los higlights de este código son:
+- Se crea un thread a partir de un callable. Con esta api creamos el thread, indicando unos argumentos
+- La comunicación con el thread se hace usando un _Event_. El _event_ se setea como false cuando se crea. Podemos setearlo a true haciendo _done.set()_. Podemos chequear el valor del evento con _get_ o con _wait_. Este último retornar true si se ha seteado el evento a true, o en caso contrario espera _x_ segundos antes de retornar un false
+- El thread se inicia con _start_
+- Podemos bloquear la ejecución hasta que un thread termine usando _join_ 
+
+```py
+import threading
+import itertools
+import time
+import sys
+
+
+def spin(msg, done):  
+    write, flush = sys.stdout.write, sys.stdout.flush
+    for char in itertools.cycle('|/-\\'):  
+        status = char + ' ' + msg
+        write(status)
+        flush()
+        #Mueve el cursor para atras
+        write('\x08' * len(status))
+        #Bloquea la ejecución, de modo que el GIL se libera. Si pasados .1 segundos no se ha seteado done a true, devolvera false
+        if done.wait(.1): 
+            break
+    write(' ' * len(status) + '\x08' * len(status))  
+
+
+def slow_function():  
+    # pretend waiting a long time for I/O
+    time.sleep(3)
+    return 42
+
+
+def supervisor():
+    #define un evento para comunicarnos con el thread
+    done = threading.Event()
+    #crea un thread con el callable
+    spinner = threading.Thread(target=spin,args=('thinking!', done))
+    print('spinner object:', spinner)
+    #arranca el thread
+    spinner.start()
+
+    result = slow_function()  
+
+    #Notifica al thread
+    done.set()
+
+    #Esperamos a que termine el thread
+    spinner.join()
+
+    return result
+
+
+def main():
+    result = supervisor()
+    print('Answer:', result)
+
+
+if __name__ == '__main__':
+    main()
+```
+
+### Process
+
+Usar un process es similar a usar in thread. Estas son las diferencias a la hora de programarlo:
+
+```py
+from multiprocessing import Process, Event
+from multiprocessing import synchronize     
+```
+
+en _multiprocessing _Event_ no es una clase sino una función que retorna un tipo _synchronize.Event_. A la hora de crear el proceso se usa una api similar:
+
+```py
+def supervisor() -> int:
+    done = Event()
+    spinner = Process(target=spin,args=('thinking!', done))
+    print(f'spinner object: {spinner}')          
+    spinner.start()
+    
+    result = slow()
+
+    done.set()
+    spinner.join()
+    
+    return result
+```
+
+la firma del callable que usamos para crear el proceso es:
+
+```py
+def spin(msg: str, done: synchronize.Event) -> None:  
+```
+
+Podemos determinar el número de cores disponibles con:
+
+```py
+multiprocessing.cpu_count()
+```
+
+#### Ejemplo. Custom Process-pool
+
+Usamos dos colas para guardar los resultados y los argumentos de entrada respectivamente:
+
+```py
+class PrimeResult(NamedTuple):  
+    n: int
+    prime: bool
+    elapsed: float
+
+JobQueue = queues.SimpleQueue[int]  
+ResultQueue = queues.SimpleQueue[PrimeResult] 
+```
+
+Determinamos el número de workers:
+
+```py
+def main() -> None:
+    if len(sys.argv) < 2:  
+        workers = cpu_count()
+    else:
+        workers = int(sys.argv[1])
+```
+
+rellenamos la cola con todo el trabajo que hay que hacer - los argumentos de entrada para el worker:
+
+```py
+for n in NUMBERS:  
+    jobs.put(n)
+```
+
+y lanzamos cada proceso:
+
+```py
+for _ in range(workers):
+    proc = Process(target=worker, args=(jobs, results))  
+    proc.start() 
+    #insertamos la poison pill que indica al worker que tiene que terminar 
+    jobs.put(0)
+```
+
+notese que con el imput 0 le decimos al worker que ya no tiene mas trabajo que procesar; Estamos ingresando dicho valor en la cola de trabajo.
+
+El trabajo propiamente dicho que hace cada worker es una función "normal":
+
+```py
+def worker(jobs: JobQueue, results: ResultQueue) -> None:  
+    while n := jobs.get():  
+        results.put(check(n)) 
+```
+
+El programa completo:
+
+```py
+import sys
+from time import perf_counter
+from typing import NamedTuple
+from multiprocessing import Process, SimpleQueue, cpu_count  
+from multiprocessing import queues  
+
+from primes import is_prime, NUMBERS
+
+class PrimeResult(NamedTuple):  
+    n: int
+    prime: bool
+    elapsed: float
+
+JobQueue = queues.SimpleQueue[int]  
+ResultQueue = queues.SimpleQueue[PrimeResult]  
+
+def check(n: int) -> PrimeResult:  
+    t0 = perf_counter()
+    res = is_prime(n)
+    return PrimeResult(n, res, perf_counter() - t0)
+
+def worker(jobs: JobQueue, results: ResultQueue) -> None:  
+    while n := jobs.get():  
+        results.put(check(n)) 
+
+def main() -> None:
+    if len(sys.argv) < 2:  
+        workers = cpu_count()
+    else:
+        workers = int(sys.argv[1])
+
+    print(f'Checking {len(NUMBERS)} numbers with {workers} processes:')
+
+    jobs: JobQueue = SimpleQueue() 
+    results: ResultQueue = SimpleQueue()
+    t0 = perf_counter()
+
+    for n in NUMBERS:  
+        jobs.put(n)
+
+    for _ in range(workers):
+        proc = Process(target=worker, args=(jobs, results))  
+        proc.start() 
+        #insertamos la poison pill que indica al worker que tiene que terminar 
+        jobs.put(0)
+```
+
 ## Generator base corutines
+
+__CPython implementation detail__: In CPython, due to the Global Interpreter Lock, only one thread can execute Python code at once (even though certain performance-oriented libraries might overcome this limitation). __If you want your application to make better use of the computational resources of multi-core machines, you are advised to use multiprocessing or concurrent.futures.ProcessPoolExecutor__. However, __threading is still an appropriate model if you want to run multiple I/O-bound tasks simultaneously__.
+
+The previous paragraph starts with “CPython implementation detail” because __the GIL is not part of the Python language definition. The Jython implementation does not have a GIL__.
 
 Veamos una corutina de este tipo:
 
@@ -2276,6 +2529,7 @@ coro_avg.send(40)
 ```
 
 La api nos ofrece un par de métodos más que nos permiten terminar una corutina, o provocar una excepción en ella:
+
 - generator.close()
 
 ```py
@@ -2305,3 +2559,67 @@ T_contra = TypeVar('T_contra', contravariant=True)
 
 class Generator(Iterator[T_co], Generic[T_co, T_contra, V_co],extra=_G_base):
 ```
+
+## Async. Corutinas nativas
+
+En una corutina nativa tenemos varias piezas:
+- Event Loop. Componente que se encarga de procesar corutinas. La corutinas son más livianas que los threads del ooss
+- Las corutinas propiamente dichas serán funciones declaradas con el prefijo _async_
+- Tasks. nos permite crear una co-rutina a ejecutar en el event loop. Se utilizará en ejecuciones non-blocking
+- Cuando necesitamos lanzar una corutina y bloquear la ejecución hasta que termine, usaremos _await_
+
+Veamos un ejemplo:
+
+- __Definimos una corutina__. Podemos ver que no precisamos de un _Event_ para interactuar con la corutina, hay otras formas, como veremos a continuación:
+
+```py
+import asyncio
+import itertools
+
+#Define este método como una corutina nativa
+async def spin(msg):
+```
+
+- __Arrancamos el event loop__. Arrancamos el event loop indicando una corutina. La ejecución se bloqueará hasta que la corutina termine devolviendo la respuesta, _result_ en nuestro ejemplo:
+
+```py
+def main():
+    #Arranca el event loop. Se bloqueará la ejecución hasta que supervisor() termine
+    result = asyncio.run(supervisor())
+```
+
+- __Tareas__. Cuando necesitemos lanzar una corutina sin bloquear la ejecución - porque no se precisa tener la respuesta de la corutina -, crearemos una tarea:
+
+```py
+ spinner = asyncio.create_task(spin('thinking!'))
+```
+
+- __await__. Cuando necesitemos lanzar una corutina y esperar por su resultado antes de seguir, usaremos _await_ al invocarla. Veamos dos ejemplos:
+
+```py
+result = await slow_function()
+
+await asyncio.sleep(3)
+```
+
+- __cancel__. Para terminar una corutina podemos usar _cancel()_. Esto hace que se dispare la excepción _asyncio.CancelledError_ en la corutina:
+
+```py
+spinner.cancel()
+```
+
+```py
+try:
+    # Devuelve el control al event loop
+    await asyncio.sleep(.1)
+except asyncio.CancelledError:
+    break
+```
+
+### Async Context Manager
+
+### Async iterator
+
+## Futures
+
+
