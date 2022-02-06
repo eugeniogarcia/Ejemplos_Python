@@ -2703,7 +2703,116 @@ except asyncio.CancelledError:
     break
 ```
 
+- __loop.run_in_executor__. Nos permite ejecutar un _awaitable_ en el event loop:
+
+```py
+async def download_one(session: aiohttp.ClientSession, cc: str, base_url: str, semaphore: asyncio.Semaphore, verbose: bool) -> Result:
+    try:
+        async with semaphore:
+            image = await get_flag(session, base_url, cc)
+    except aiohttp.ClientResponseError as exc:
+        if exc.status == 404:
+            status = HTTPStatus.not_found
+            msg = 'not found'
+        else:
+            raise FetchError(cc) from exc
+    else:
+        loop = asyncio.get_running_loop()   
+        loop.run_in_executor(None,save_flag, image, f'{cc}.gif')  
+        status = HTTPStatus.ok
+        msg = 'OK'
+    
+if verbose and msg:
+        print(cc, msg)
+    return Result(status, cc)
+```
+
+vemos comos conseguimos el loop:
+
+```py
+loop = asyncio.get_running_loop()   
+```
+
+y lo usamos para ejecutar un _async_ llamado *save_flag* con una serie de argumentos que se indican. En primer argumento nos permite especificar un threadpool. Sino lo especificamos se usa el threadpool asignado por defecto al event loop - *The main reason to pass an explict Executor to loop.run_in_executor is to employ a ProcessPoolExecutor if the function to execute is CPU intensive, so that it runs in a different Python process, avoiding contention for the GIL. Because of the high start-up cost, it would be better to start the ProcessPoolExecutor in the supervisor, and pass it to the coroutines that need to use it.*:
+
+```py
+loop.run_in_executor(None,save_flag, image, f'{cc}.gif')  
+```
+
+
 ### Async Context Manager
 
+Como en los contextos "clasicos" para crear un contexto tenemos que implementar un interface con el método a ejecutar cuando se cree el contexto - y que retorna el propio contexto -, y otro mátodo para ser invocado al término del contexto. Los métodos serán _aenter_ y _aexit_. _aenter_ retornará un _awaitable_.
+
+También se puede definir el _context manager_ usando un generador:
+
+```py
+async def download_one(session: aiohttp.ClientSession,  
+                       cc: str,
+                       base_url: str,
+                       semaphore: 
+asyncio.Semaphore,
+                       verbose: bool) -> Result:
+    try:
+        async with semaphore:  
+            image = await get_flag(session, base_url, cc)
+    except aiohttp.ClientResponseError as exc:
+        if exc.status == 404:               
+            status = HTTPStatus.not_found
+            msg = 'not found'
+        else:
+            raise FetchError(cc) from exc  
+    else:
+        save_flag(image, f'{cc}.gif')
+        status = HTTPStatus.ok
+        msg = 'OK'
+        if verbose and msg:
+        print(cc, msg)
+    return Result(status, cc)
+```
+#### Crear un async context manager por medio de un aSync generator
+
+Podemos decorrar un async generator con _@asynccontextmanager_ para crear un async context manager. El _aenter_ sería el código hasta llegar a _yield_, y el _aexit_ el código subsecuente:
+
+```py
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def web_page(url):  
+    loop = asyncio.get_running_loop()   
+    data = await loop.run_in_executor(  
+        None, download_webpage, url)
+    yield data                          
+    await loop.run_in_executor(None, update_stats, url)  
+
+async with web_page('google.com') as data:  
+    process(data)
+```
+
+### semaforos
+
+Es un construct que nos permite sincronizar el acceso. Se crea con un integer - si no se especifica el valor será 1.
+
+```py
+semaphore = asyncio.Semaphore(concur_req)
+```
+
+Cuando necesitemos adquirir el thread haremos `acquire()`. Si el contador es mayor que cero, lo reduce y devuelve el control. Sino es así, se bloquea la ejecución hasta que se haga un `release()` desde otro thread. `_release()_` incrementa el valor del contador del semaforo en uno, y desbloquea uno de los threads que estuvieran bloqueados en _aquire_. El semafor es un contexto como podemos ver - en este uso, que es el más común:
+
+```py
+async with semaphore:
+    image = await get_flag(session, base_url, cc)
+```
+
+En el _aenter_ se hace el _acquire_ y en el _aexit_ el _release_. Notese como el contexto se crea con _async with_.
 
 ### Async iterator
+
+Un _awaitable_ es a _async_ lo que un _iterable_ es a _iterator_. Para crear un _awaitable_ tenemos que implementar *\__aiter\__*.
+
+
+### Consola asincrona
+
+```ps
+python -m asyncio
+```
