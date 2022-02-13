@@ -525,7 +525,7 @@ class HackerClubMember(ClubMember):
 
 ### Typed class attributes
 
-`ClassVar` nos permite usar la notación de `generics`, `[]`, para definir tipos. Por ejemplo, para indicar que una variable es un set de strings:
+Con `ClassVar` estgamos indicando que una determinada variable es una variable de clase, no de instancia. Entre corchetes indicaremos el tipo de esa variable. Esta declaración nos permite usar la notación de `generics`, `[]`, para definir tipos. Por ejemplo, para indicar que una variable es un set de strings:
 
 all_handles: ClassVar[set[str]] = set()
 
